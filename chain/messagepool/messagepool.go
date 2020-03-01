@@ -3,7 +3,7 @@ package messagepool
 import (
 	"bytes"
 	"context"
-	"errors"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -31,17 +31,27 @@ import (
 
 var log = logging.Logger("messagepool")
 
-var (
-	ErrMessageTooBig = errors.New("message too big")
+const bigNonceThreshold uint64 = 100
 
-	ErrMessageValueTooHigh = errors.New("cannot send more filecoin than will ever exist")
+	type MpoolError struct {
+	msg   string
+	shouldBroadcast bool
+}
 
-	ErrNonceTooLow = errors.New("message nonce too low")
+func (e *MpoolError) Error() string {
+	return e.msg
+}
 
-	ErrNotEnoughFunds = errors.New("not enough funds to execute transaction")
+func (e *MpoolError) ShouldBroadcast() bool {
+	return e.shouldBroadcast
+}
 
-	ErrInvalidToAddr = errors.New("message had invalid to address")
-)
+func NewError(m string, sb bool) *MpoolError {
+	return &MpoolError{
+		msg:             m,
+		shouldBroadcast: sb,
+	}
+}
 
 const (
 	msgTopic = "/fil/messages"
@@ -293,38 +303,41 @@ func (mp *MessagePool) Add(m *types.SignedMessage) error {
 func (mp *MessagePool) addTs(m *types.SignedMessage, curTs *types.TipSet) error {
 	// big messages are bad, anti DOS
 	if m.Size() > 32*1024 {
-		return xerrors.Errorf("mpool message too large (%dB): %w", m.Size(), ErrMessageTooBig)
+		return NewError(fmt.Sprintf("mpool message too large (%dB)", m.Size()), false)
 	}
 
 	if m.Message.To == address.Undef {
-		return ErrInvalidToAddr
+		return NewError("message had invalid to address", false)
 	}
 
 	if !m.Message.Value.LessThan(types.TotalFilecoinInt) {
-		return ErrMessageValueTooHigh
+		return NewError("cannot send more filecoin than will ever exist", false)
 	}
 
 	if err := sigs.Verify(&m.Signature, m.Message.From, m.Message.Cid().Bytes()); err != nil {
-		log.Warnf("mpooladd signature verification failed: %s", err)
-		return err
+		return NewError(fmt.Sprintf("mpooladd signature verification failed: %s", err), false)
 	}
 
 	snonce, err := mp.getStateNonce(m.Message.From, curTs)
 	if err != nil {
-		return xerrors.Errorf("failed to look up actor state nonce: %w", err)
+		return  NewError(fmt.Sprintf("failed to look up actor state nonce: %s", err), true)
 	}
 
 	if snonce > m.Message.Nonce {
-		return xerrors.Errorf("minimum expected nonce is %d: %w", snonce, ErrNonceTooLow)
+		return  NewError(fmt.Sprintf("minimum expected nonce is %d", snonce), false)
+	}
+
+	if snonce + bigNonceThreshold < m.Message.Nonce {
+		return NewError(fmt.Sprintf("message nonce (%d) is signifcantly greater than stored nonce (%d)"), false)
 	}
 
 	balance, err := mp.getStateBalance(m.Message.From, curTs)
 	if err != nil {
-		return xerrors.Errorf("failed to check sender balance: %w", err)
+		return  NewError(fmt.Sprintf("failed to check sender balance: %s", err), true)
 	}
 
 	if balance.LessThan(m.Message.RequiredFunds()) {
-		return xerrors.Errorf("not enough funds (required: %s, balance: %s): %w", types.FIL(m.Message.RequiredFunds()), types.FIL(balance), ErrNotEnoughFunds)
+		return  NewError(fmt.Sprintf("not enough funds (required: %s, balance: %s)", types.FIL(m.Message.RequiredFunds()), types.FIL(balance)), true)
 	}
 
 	mp.lk.Lock()
@@ -709,10 +722,6 @@ func (mp *MessagePool) loadLocal() error {
 		}
 
 		if err := mp.Add(&sm); err != nil {
-			if xerrors.Is(err, ErrNonceTooLow) {
-				continue // todo: drop the message from local cache (if above certain confidence threshold)
-			}
-
 			log.Errorf("adding local message: %+v", err)
 		}
 	}

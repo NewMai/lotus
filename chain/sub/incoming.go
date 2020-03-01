@@ -169,8 +169,13 @@ func (mv *MessageValidator) Validate(ctx context.Context, pid peer.ID, msg *pubs
 	}
 
 	if err := mv.mpool.Add(m); err != nil {
-		log.Warnf("failed to add message from network to message pool (From: %s, To: %s, Nonce: %d, Value: %s): %s", m.Message.From, m.Message.To, m.Message.Nonce, types.FIL(m.Message.Value), err)
-		return false
+		log.Debugf("failed to add message from network to message pool (From: %s, To: %s, Nonce: %d, Value: %s): %s", m.Message.From, m.Message.To, m.Message.Nonce, types.FIL(m.Message.Value), err)
+		switch v := err.(type) {
+		case *messagepool.MpoolError:
+			return v.ShouldBroadcast()
+		default:
+			return false
+		}
 	}
 
 	return true
