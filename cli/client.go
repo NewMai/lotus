@@ -35,9 +35,15 @@ var clientCmd = &cli.Command{
 }
 
 var clientImportCmd = &cli.Command{
-	Name:  "import",
-	Usage: "Import data",
+	Name:      "import",
+	Usage:     "Import data",
 	ArgsUsage: "[inputPath]",
+	Flags: []cli.Flag{
+		&cli.BoolFlag{
+			Name:  "car",
+			Usage: "export to a car file instead of a regular file",
+		},
+	},
 	Action: func(cctx *cli.Context) error {
 		api, closer, err := GetFullNodeAPI(cctx)
 		if err != nil {
@@ -50,7 +56,11 @@ var clientImportCmd = &cli.Command{
 			return err
 		}
 
-		c, err := api.ClientImport(ctx, absPath)
+		ref := lapi.FileRef{
+			Path:  absPath,
+			IsCAR: cctx.Bool("car"),
+		}
+		c, err := api.ClientImport(ctx, ref)
 		if err != nil {
 			return err
 		}
@@ -82,8 +92,8 @@ var clientLocalCmd = &cli.Command{
 }
 
 var clientDealCmd = &cli.Command{
-	Name:  "deal",
-	Usage: "Initialize storage deal with a miner",
+	Name:      "deal",
+	Usage:     "Initialize storage deal with a miner",
 	ArgsUsage: "[dataCid miner price duration]",
 	Flags: []cli.Flag{
 		&cli.BoolFlag{
@@ -193,8 +203,8 @@ var clientDealCmd = &cli.Command{
 }
 
 var clientFindCmd = &cli.Command{
-	Name:  "find",
-	Usage: "find data in the network",
+	Name:      "find",
+	Usage:     "find data in the network",
 	ArgsUsage: "[dataCid]",
 	Action: func(cctx *cli.Context) error {
 		if !cctx.Args().Present() {
@@ -243,13 +253,17 @@ var clientFindCmd = &cli.Command{
 }
 
 var clientRetrieveCmd = &cli.Command{
-	Name:  "retrieve",
-	Usage: "retrieve data from network",
+	Name:      "retrieve",
+	Usage:     "retrieve data from network",
 	ArgsUsage: "[dataCid outputPath]",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:  "address",
 			Usage: "address to use for transactions",
+		},
+		&cli.BoolFlag{
+			Name:  "car",
+			Usage: "export to a car file instead of a regular file",
 		},
 	},
 	Action: func(cctx *cli.Context) error {
@@ -304,7 +318,11 @@ var clientRetrieveCmd = &cli.Command{
 			return nil
 		}
 
-		if err := api.ClientRetrieve(ctx, offers[0].Order(payer), cctx.Args().Get(1)); err != nil {
+		ref := lapi.FileRef{
+			Path:  cctx.Args().Get(1),
+			IsCAR: cctx.Bool("car"),
+		}
+		if err := api.ClientRetrieve(ctx, offers[0].Order(payer), ref); err != nil {
 			return xerrors.Errorf("Retrieval Failed: %w", err)
 		}
 
@@ -314,8 +332,8 @@ var clientRetrieveCmd = &cli.Command{
 }
 
 var clientQueryAskCmd = &cli.Command{
-	Name:  "query-ask",
-	Usage: "find a miners ask",
+	Name:      "query-ask",
+	Usage:     "find a miners ask",
 	ArgsUsage: "[minerAddress]",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
