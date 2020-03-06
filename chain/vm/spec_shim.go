@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"reflect"
 	"runtime/debug"
 
 	"github.com/filecoin-project/go-address"
@@ -69,6 +70,9 @@ func (rs *runtimeShim) shimCall(f func() interface{}) (rval []byte, aerr aerrors
 	case []byte:
 		return ret, nil
 	case cbg.CBORMarshaler:
+		if reflect.ValueOf(ret).IsNil() {
+			return nil, nil
+		}
 		buf := new(bytes.Buffer)
 		if err := ret.MarshalCBOR(buf); err != nil {
 			return nil, aerrors.Absorb(err, 2, "failed to marshal response to cbor")
